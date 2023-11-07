@@ -1,0 +1,106 @@
+---
+ - name : install java and net-tools
+   hosts: web1
+   tasks:
+       - name: Update APT repositories and cache
+         yum:
+          update_cache: yes
+
+       - name: Install the EPEL repository
+         yum:
+           name: epel-release
+           state: present
+       - name: install java 8
+         package:
+           name: java-1.8.0-openjdk
+
+
+       - name: install net net-tools
+         yum:
+           name: net-tools
+
+ - name: Download and unpack nexus installer
+   hosts: web1
+   tasks:
+       - name: Check if nexus folder stats
+         stat: 
+           path: /opt/nexus
+         register: stat_result
+       - name: Download nexus
+         get_url:
+            url: https://download.sonatype.com/nexus/3/latest-unix.tar.gz
+            dest: /opt/
+         register: download_result
+       
+       - name: untar nexus installer
+         unarchive:
+            src: "{{download_result.dest}}"
+            dest: /opt/
+            remote_src: yes
+         when: not stat_result.stat.exists    
+       - name: find nexus folder
+         find:
+           path: /opt
+           pattern: "nexus-*"
+           file_type: directory
+         register: find_result
+      
+       - debug: msg={{stat_result.stat.exists}}
+       - name: rename nexus folder
+         shell: mv {{find_result.files[0].path}} /opt/nexus
+         when: not stat_result.stat.exists
+
+ - name: Create nexus user to own nexus folder
+   hosts: web1
+   tasks:
+     - name: ensure group nexus exists
+       group:
+         name: nexus
+         state: present
+     - name: create nexus user
+       user:
+         name: nexus
+         group: nexus
+     - name: make nexus user owner of nexus folder
+       file:
+        path: /opt/nexus
+        state: directory
+        owner: nexus
+        group: nexus
+        recurse: yes
+     - name: make nexus user owner of nexus folder
+       file:
+        path: /opt/sonatype-work
+        state: directory
+        owner: nexus
+        group: nexus
+        recurse: yes
+
+ - name: Start nexus with nexus user
+   hosts: web1
+   become: True
+   become_user: nexus
+   tasks:
+     - name: Set run_as_user nexus
+       lineinfile: 
+          path: /opt/nexus/bin/nexus.rc
+          regexp: '^# run_as_user=""'
+          line: 
+            run_as_user="nexus"
+     - name: Start nexus
+       command: /opt/nexus/bin/nexus start
+
+ - name: Verify nexus runing         
+   hosts: web1
+   tasks: 
+     - name:  check with ps
+       shell: ps aux | grep nexus
+       register: app_status 
+     - debug: msg={{app_status.stdout_lines}} 
+     - name: wait one minute
+       pause:
+         minutes: 1
+     - name: check with netstat 
+       shell: netstat -plnt
+       register: app_status
+     - debug: msg={{app_status.stdout_lines}}
